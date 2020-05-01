@@ -1,0 +1,1039 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# # 1
+
+# In[2]:
+
+
+from pandas_datareader import data
+
+
+# In[3]:
+
+
+start_date = '2014-01-01'
+end_date = '2018-01-01'
+goog_data = data.DataReader('GooG', "yahoo", start_date,end_date)
+
+
+# In[18]:
+
+
+import pandas as pd
+import numpy as np
+
+
+# In[12]:
+
+
+goog_data_signal = pd.DataFrame(index=goog_data.index)
+
+
+# In[13]:
+
+
+goog_data_signal['price'] = goog_data['Adj Close']
+
+
+# In[14]:
+
+
+goog_data_signal["daily difference"] = goog_data_signal['price'].diff()
+
+
+# In[15]:
+
+
+goog_data_signal
+
+
+# In[24]:
+
+
+goog_data_signal['signal'] = 0.0
+goog_data_signal['signal'] = np.where(goog_data_signal["daily difference"] > 0, 1.0, 0.0)
+
+
+# In[25]:
+
+
+goog_data_signal
+
+
+# In[30]:
+
+
+goog_data_signal["positions"] = goog_data_signal['signal'].diff()
+
+
+# In[45]:
+
+
+goog_data_signal.head()
+
+
+# In[32]:
+
+
+import matplotlib.pyplot as plt
+
+
+# In[50]:
+
+
+fig = plt.figure()
+ax1 = fig.add_subplot(111,ylabel = 'Google Price in $')
+goog_data_signal['price'].plot(ax = ax1, color = 'r', lw = 2)
+ax1.plot(goog_data_signal.loc[goog_data_signal.positions == -1].index, goog_data_signal.price[goog_data_signal.positions==-1], "v", color = 'k')
+ax1.plot(goog_data_signal.loc[goog_data_signal.positions==1].index, goog_data_signal.price[goog_data_signal.positions==1],'^',  color = 'm')
+
+
+# In[51]:
+
+
+#backtest
+
+
+# In[52]:
+
+
+initial_capital = float(1000.0)
+
+
+# In[53]:
+
+
+positions = pd.DataFrame(index=goog_data_signal.index).fillna(0.0)
+
+
+# In[54]:
+
+
+portfolio = pd.DataFrame(index=goog_data_signal.index).fillna(0.0)
+
+
+# In[59]:
+
+
+positions['GooG'] = goog_data_signal['signal']
+portfolio['positions'] = positions.multiply(goog_data_signal['price'], axis= 0)
+
+
+# In[61]:
+
+
+portfolio['cash'] = initial_capital - (positions.diff().multiply(goog_data_signal['price'], axis=0)).cumsum()
+
+
+# In[62]:
+
+
+portfolio['total'] = portfolio['positions'] + portfolio['cash']
+
+
+# In[64]:
+
+
+portfolio
+
+
+# # 2
+
+# In[65]:
+
+
+import pandas as pd
+from pandas_datareader import data
+
+
+# In[66]:
+
+
+start_date = '2014-01-01'
+end_date = '2018-01-01'
+
+SRC_DATA_FILENAME = 'goog_data.pkl'
+
+
+# In[67]:
+
+
+try:
+    goog_data2  = pd.read_pickle(SRC_DATA_FILENAME)
+except FileNotFoundError:
+    goog_data2 = data.DataReader('GOOG','yahoo',start_date, end_date)
+    goog_data2.to_pickle(SRC_DATA_FILENAME)
+    
+
+
+# In[74]:
+
+
+goog_data = goog_data2.tail(620)
+lows = goog_data['Low']
+highs = goog_data['High']
+
+
+# In[75]:
+
+
+import matplotlib.pyplot as plt
+
+
+# In[90]:
+
+
+fig = plt.figure(figsize = (16,10))
+ax1 = fig.add_subplot(111, ylabel = 'Google Price in $')
+highs.plot(ax = ax1,color = 'r', lw = 2)
+#fig1 = plt.figure()
+#ax1 = fig.add_subplot(111, ylabel = 'Google Price in $')
+lows.plot(ax = ax1,color = 'k', lw = 2)
+plt.hlines(highs.head(200).max(),lows.index.values[0],lows.index.values[-1], linewidth = 2 , color = 'g')
+plt.hlines(lows.head(200).min(),lows.index.values[0],lows.index.values[-1], linewidth = 2 , color = 'r')
+plt.axvline(linewidth = 2, color = 'b', x = lows.index.values[200], linestyle = ':')
+
+
+# In[96]:
+
+
+lows.index.values[200]
+
+
+# In[99]:
+
+
+import pandas as pd
+import numpy as np
+from pandas_datareader import data
+start_date = '2014-01-01'
+end_date = '2018-01-01'
+SRC_DATA_FILENANME = 'goog_data.pkl'
+try:
+    goog_data = pd.read_pickle(SRC_DATA_FILENAME)
+    print('data found')
+except FileNotFoundError:
+    print('data not found. downloading...')
+    goog_data = data.DataReader('GOOG', yahoo, start_date, end_date)
+    goog_data.to_pickle(SRC_DATA_FILENANME)
+goog_data_signal = pd.DataFrame(index = goog_data.index)
+goog_data_signal['price'] = goog_data['Adj Close']
+
+
+# # support & resistnace strategy
+
+# In[107]:
+
+
+def trading_support_resistance(data, bin_width = 20):
+    data['sup_tolerance'] = pd.Series(np.zeros(len(data)))
+    data['res_tolerance'] = pd.Series(np.zeros(len(data)))
+    data['sup_count'] = pd.Series(np.zeros(len(data)))
+    data['res_count'] = pd.Series(np.zeros(len(data)))
+    data['sup'] = pd.Series(np.zeros(len(data)))
+    data['res'] = pd.Series(np.zeros(len(data)))
+    data['positions'] = pd.Series(np.zeros(len(data)))
+    data['signal'] = pd.Series(np.zeros(len(data)))
+    in_support = 0
+    in_resistance = 0
+    print('Data Length = ', len(data))
+    
+    for x in range((bin_width-1)+bin_width,len(data)):
+        data_section = data[x-bin_width : x+1]
+        support_level = min(data_section['price'])
+        resistance_level = max((data_section['price']))
+        range_level = resistance_level - support_level
+        data['res'][x] = resistance_level
+        data['sup'][x]=support_level
+        data['sup_tolerance'][x] = support_level + 0.2*range_level
+        data['res_tolerance'][x] = resistance_level - 0.2*range_level
+        
+        if data['price'][x]>= data['res_tolerance'][x] and data['price'][x]<=data['res'][x]:
+            in_resistance+= 1
+            data['res_count'][x] = in_resistance
+        elif data['price'][x]<= data['sup_tolerance'][x] and data['price'][x]>= data['sup'][x]:        
+            in_support+= 1 
+            data['sup_count'][x] = in_support
+        
+        else:
+            in_support =0
+            in_resistance = 0
+        
+        if in_resistance>2:
+            
+            data['signal'][x]= 1
+        elif in_support > 2:
+            data['signal'][x] = 0
+        else:
+            data['signal'][x] = data['signal'][x-1]
+    
+    data['positions'] = data['signal'].diff()
+
+            
+
+
+# In[109]:
+
+
+trading_support_resistance(goog_data_signal)
+
+
+# In[119]:
+
+
+import matplotlib.pyplot as plt
+
+fig = plt.figure(figsize = (16,10))
+ax1 = fig.add_subplot(111,ylabel = 'Google Price in $')
+goog_data_signal['sup'].plot(ax=ax1, color = 'g', lw =2)
+goog_data_signal['res'].plot(ax = ax1, color = 'b', lw = 2)
+goog_data_signal['price'].plot(ax = ax1, color = 'r', lw = 2)
+ax1.plot(goog_data_signal.loc[goog_data_signal.positions ==1].index, goog_data_signal.price[goog_data_signal.positions==1], '^',markersize = 10, color = 'k', label = 'buy')
+ax1.plot(goog_data_signal.loc[goog_data_signal.positions ==-1].index, goog_data_signal.price[goog_data_signal.positions==-1], 'v',markersize = 10, color = 'c', label = 'buy')
+plt.legend()
+plt.show()
+
+
+# # SMA
+
+# In[26]:
+
+
+'''
+The Simple Moving Average (SMA) is calculated
+ by adding the price of an instrument over a number of time periods
+ and then dividing the sum by the number of time periods. The SMA
+ is basically the average price of the given time period, with equal
+ weighting given to the price of each period.
+Simple Moving Average
+SMA = ( Sum ( Price, n ) ) / n    
+Where: n = Time Period
+'''
+
+
+# In[1]:
+
+
+import pandas as pd
+
+from pandas_datareader import data
+
+start_date = '2014-01-01'
+end_date = '2018-01-01'
+SRC_DATA_FILENAME = 'goog_data.pkl'
+
+try:
+    goog_data2 = pd.read_pickle(SRC_DATA_FILENAME)
+except FileNotFoundError:
+    goog_data2 = data.DataReader('GOOG', 'yahoo', start_date, end_date)
+    goog_data2.to_pickle(SRC_DATA_FILENAME)
+
+goog_data = goog_data2.tail(620)
+
+close = goog_data['Close']
+
+
+# In[3]:
+
+
+import statistics as stats
+
+time_period = 20
+history = []
+sma_values = []
+
+for close_price in close:
+    history.append(close_price)
+    if len(history)>time_period:
+        del (history[0])
+    sma_values.append(stats.mean(history))
+    
+goog_data = goog_data.assign(ClosePrice = pd.Series(close, index = goog_data.index))
+goog_data = goog_data.assign(Simple20DayMovingAverage = pd.Series(sma_values,index = goog_data.index))
+
+
+# In[4]:
+
+
+close_price = goog_data['ClosePrice']
+
+
+# In[5]:
+
+
+sma = goog_data['Simple20DayMovingAverage']
+
+
+# In[6]:
+
+
+import matplotlib.pyplot as plt
+
+
+# In[8]:
+
+
+fig = plt.figure()
+ax1 = fig.add_subplot(111, ylabel = 'Google price in $')
+close_price.plot(ax = ax1, color = 'g', lw = 2, legend = True)
+sma.plot(ax=ax1,color = 'r', lw =2. , legend = True)
+
+
+# # EMA
+
+# In[1]:
+
+
+'''
+The Exponential Moving Average (EMA) represents
+ an average of prices, but places more weight on recent prices. The
+ weighting applied to the most recent price depends on the selected
+ period of the moving average. The shorter the period for the EMA,
+ the more weight that will be applied to the most recent price.
+ 
+EMA = ( P - EMAp ) * K + EMAp
+Where:
+P = Price for the current period
+EMAp = the Exponential moving Average for the previous period
+K = the smoothing constant, equal to 2 / (n + 1)
+n = the number of periods in a simple moving average roughly approximated by the EMA
+'''
+
+
+# In[9]:
+
+
+num_periods =20
+K = 2/(num_periods+1)
+ema_p = 0
+ema_values = []
+for close_price in close:
+    if(ema_p == 0): 
+        ema_p = close_price
+    else:
+        ema_p = (close_price - ema_p)*K + ema_p  #EMA = ( P - EMAp ) * K + EMAp
+    
+    ema_values.append(ema_p)
+    
+
+
+# In[11]:
+
+
+goog_data = goog_data.assign(ClosePrice = pd.Series(close,index = goog_data.index))
+goog_data = goog_data.assign(Exponential20DayMovingAverage = pd.Series(ema_values,index = goog_data.index))
+close_price = goog_data['ClosePrice']
+ema = goog_data['Exponential20DayMovingAverage']
+
+
+# In[14]:
+
+
+import matplotlib.pyplot as plt
+
+fig = plt.figure()
+ax1 = fig.add_subplot(111, ylabel ='Google Price in $')
+close_price.plot(ax = ax1, color ='g', lw = 2, legend = True)
+ema.plot(ax =ax1 , color = 'b', lw =2, legend = True)
+
+
+# # APO
+
+# In[27]:
+
+
+'''
+The Absolute Price Oscillator (APO) is based
+ on the absolute differences between two moving averages of different
+ lengths, a ‘Fast’ and a ‘Slow’ moving average.
+APO = Fast Exponential Moving Average - Slow Exponential Moving Average
+'''
+
+
+# In[11]:
+
+
+import pandas as pd
+
+from pandas_datareader import data
+
+start_date = '2014-01-01'
+end_date = '2018-01-01'
+SRC_DATA_FILENAME = 'goog_data.pkl'
+
+try:
+    goog_data2 = pd.read_pickle(SRC_DATA_FILENAME)
+except FileNotFoundError:
+    goog_data2 = data.DataReader('GOOG', 'yahoo', start_date, end_date)
+    goog_data2.to_pickle(SRC_DATA_FILENAME)
+
+goog_data = goog_data2.tail(620)
+
+close = goog_data['Close']
+
+'''
+The Absolute Price Oscillator (APO) is based
+ on the absolute differences between two moving averages of different
+ lengths, a ‘Fast’ and a ‘Slow’ moving average.
+APO = Fast Exponential Moving Average - Slow Exponential Moving Average
+'''
+num_periods_fast = 10 # time period for the fast EMA
+K_fast = 2 / (num_periods_fast + 1) # smoothing factor for fast EMA
+ema_fast = 0
+num_periods_slow = 40 # time period for slow EMA
+K_slow = 2 / (num_periods_slow + 1) # smoothing factor for slow EMA
+ema_slow = 0
+
+
+# In[12]:
+
+
+ema_fast_values = [] # we will hold fast EMA values for visualization purposes
+ema_slow_values = [] # we will hold slow EMA values for visualization purposes
+apo_values = [] # track computed absolute price oscillator values
+
+
+# In[13]:
+
+
+for close_price in close:
+    if (ema_fast == 0): # first observation
+        ema_fast = close_price
+        ema_slow = close_price
+    else:
+        ema_fast = (close_price - ema_fast) * K_fast + ema_fast
+        ema_slow = (close_price - ema_slow) * K_slow + ema_slow
+    ema_fast_values.append(ema_fast)
+    ema_slow_values.append(ema_slow)
+    apo_values.append(ema_fast - ema_slow)
+
+
+# In[15]:
+
+
+goog_data = goog_data.assign(ClosePrice=pd.Series(close, index=goog_data.index))
+goog_data = goog_data.assign(FastExponential10DayMovingAverage=pd.Series(ema_fast_values, index=goog_data.index))
+goog_data = goog_data.assign(SlowExponential40DayMovingAverage=pd.Series(ema_slow_values, index=goog_data.index))
+goog_data = goog_data.assign(AbsolutePriceOscillator=pd.Series(apo_values, index=goog_data.index))
+close_price = goog_data['ClosePrice']
+ema_f = goog_data['FastExponential10DayMovingAverage']
+ema_s = goog_data['SlowExponential40DayMovingAverage']
+apo = goog_data['AbsolutePriceOscillator']
+import matplotlib.pyplot as plt
+fig = plt.figure()
+ax1 = fig.add_subplot(211, ylabel='Google price in $')
+close_price.plot(ax=ax1, color='g', lw=2., legend=True)
+ema_f.plot(ax=ax1, color='b', lw=2., legend=True)
+ema_s.plot(ax=ax1, color='r', lw=2., legend=True)
+ax2 = fig.add_subplot(212, ylabel='APO')
+apo.plot(ax=ax2, color='black', lw=2., legend=True)
+plt.show()
+
+
+# # moving average convergence divergence
+
+# In[16]:
+
+
+num_periods_fast = 10 # fast EMA time period
+K_fast = 2 / (num_periods_fast + 1) # fast EMA smoothing factor
+ema_fast = 0
+num_periods_slow = 40 # slow EMA time period
+K_slow = 2 / (num_periods_slow + 1) # slow EMA smoothing factor
+ema_slow = 0
+num_periods_macd = 20 # MACD EMA time period
+K_macd = 2 / (num_periods_macd + 1) # MACD EMA smoothing factor
+ema_macd = 0
+
+
+# In[17]:
+
+
+ema_fast_values = [] # track fast EMA values for visualization purposes
+ema_slow_values = [] # track slow EMA values for visualization purposes
+macd_values = [] # track MACD values for visualization purposes
+macd_signal_values = [] # MACD EMA values tracker
+macd_histogram_values = [] # MACD - MACD-EMA
+for close_price in close:
+    if (ema_fast == 0): # first observation
+        ema_fast = close_price
+        ema_slow = close_price
+    else: 
+        ema_fast = (close_price - ema_fast) * K_fast + ema_fast
+        ema_slow = (close_price - ema_slow) * K_slow + ema_slow
+    
+    ema_fast_values.append(ema_fast)
+    ema_slow_values.append(ema_slow)
+    macd = ema_fast - ema_slow # MACD is fast_MA - slow_EMA
+    
+    if ema_macd == 0:
+        ema_macd = macd
+    else:
+        ema_macd = (macd - ema_macd) * K_slow + ema_macd # signal is EMA of MACD values
+    
+    macd_values.append(macd)
+    macd_signal_values.append(ema_macd)
+    macd_histogram_values.append(macd - ema_macd)
+
+
+# In[20]:
+
+
+goog_data = goog_data.assign(ClosePrice=pd.Series(close, index=goog_data.index))
+goog_data = goog_data.assign(FastExponential10DayMovingAverage=pd.Series(ema_fast_values, index=goog_data.index))
+goog_data = goog_data.assign(SlowExponential40DayMovingAverage=pd.Series(ema_slow_values, index=goog_data.index))
+goog_data = goog_data.assign(MovingAverageConvergenceDivergence=pd.Series(macd_values,index=goog_data.index))
+goog_data = goog_data.assign(Exponential20DayMovingAverageOfMACD=pd.Series(macd_signal_values, index=goog_data.index))
+goog_data = goog_data.assign(MACDHistorgram=pd.Series(macd_histogram_values,index=goog_data.index))
+close_price = goog_data['ClosePrice']
+
+
+# In[23]:
+
+
+ema_f = goog_data['FastExponential10DayMovingAverage']
+ema_s = goog_data['SlowExponential40DayMovingAverage']
+macd = goog_data['MovingAverageConvergenceDivergence']
+ema_macd = goog_data['Exponential20DayMovingAverageOfMACD']
+macd_histogram = goog_data['MACDHistorgram']
+#import matplotlib.pyplot as plt
+fig = plt.figure(figsize=(16,10))
+ax1 = fig.add_subplot(311, ylabel='Google price in $')
+close_price.plot(ax=ax1, color='g', lw=2., legend=True)
+ema_f.plot(ax=ax1, color='b', lw=2., legend=True)
+ema_s.plot(ax=ax1, color='r', lw=2., legend=True)
+ax2 = fig.add_subplot(312, ylabel='MACD')
+macd.plot(ax=ax2, color='black', lw=2., legend=True)
+ema_macd.plot(ax=ax2, color='g', lw=2., legend=True)
+ax3 = fig.add_subplot(313, ylabel='MACD')
+macd_histogram.plot(ax=ax3, color='r', kind='bar', legend=True,
+use_index=False)
+plt.show()
+
+
+# # Bollinger Brands
+
+# In[24]:
+
+
+'''
+The Bollinger Band (BBANDS) study created
+ by John Bollinger plots upper and lower envelope bands around the
+ price of the instrument. The width of the bands is based on the
+ standard deviation of the closing prices from a moving average of
+ price.
+ Middle
+ Band = n-period moving average
+Upper
+ Band = Middle Band + ( y * n-period standard deviation)
+Lower Band = Middle Band - ( y *
+ n-period standard deviation)
+Where:
+n = number of periods
+y = factor to apply to the standard deviation value, (typical default for y = 2)
+Detailed:
+Calculate the moving average.
+ The formula is:
+d = ((P1-MA)^2 + (P2-MA)^2 + ... (Pn-MA)^2)/n
+Pn is the price you pay for the nth interval
+n is the number of periods you select
+Subtract the moving average
+ from each of the individual data points used in the moving average
+ calculation. This gives you a list of deviations from the average.
+ Square each deviation and add them all together. Divide this sum
+ by the number of periods you selected.
+Take the square root of d. This gives you the standard deviation.
+delta = sqrt(d)
+Compute the bands by using the following formulas:
+Upper Band = MA + delta
+Middle Band = MA
+Lower Band = MA - delta
+'''
+import statistics as stats
+import math as math
+
+time_period = 20 # history length for Simple Moving Average for middle band
+stdev_factor = 2 # Standard Deviation Scaling factor for the upper and lower bands
+history = [] # price history for computing simple moving average
+sma_values = [] # moving average of prices for visualization purposes
+upper_band = [] # upper band values
+lower_band = [] # lower band values
+
+for close_price in close:
+  history.append(close_price)
+  if len(history) > time_period: # we only want to maintain at most 'time_period' number of price observations
+    del (history[0])
+
+  sma = stats.mean(history)
+  sma_values.append(sma) # simple moving average or middle band
+  variance = 0 # variance is the square of standard deviation
+  for hist_price in history:
+    variance = variance + ((hist_price - sma) ** 2)
+
+  stdev = math.sqrt(variance / len(history)) # use square root to get standard deviation
+
+  upper_band.append(sma + stdev_factor * stdev)
+  lower_band.append(sma - stdev_factor * stdev)
+
+goog_data = goog_data.assign(ClosePrice=pd.Series(close, index=goog_data.index))
+goog_data = goog_data.assign(MiddleBollingerBand20DaySMA=pd.Series(sma_values, index=goog_data.index))
+goog_data = goog_data.assign(UpperBollingerBand20DaySMA2StdevFactor=pd.Series(upper_band, index=goog_data.index))
+goog_data = goog_data.assign(LowerBollingerBand20DaySMA2StdevFactor=pd.Series(lower_band, index=goog_data.index))
+
+close_price = goog_data['ClosePrice']
+mband = goog_data['MiddleBollingerBand20DaySMA']
+uband = goog_data['UpperBollingerBand20DaySMA2StdevFactor']
+lband = goog_data['LowerBollingerBand20DaySMA2StdevFactor']
+
+import matplotlib.pyplot as plt
+
+fig = plt.figure()
+ax1 = fig.add_subplot(111, ylabel='Google price in $')
+close_price.plot(ax=ax1, color='g', lw=2., legend=True)
+mband.plot(ax=ax1, color='b', lw=2., legend=True)
+uband.plot(ax=ax1, color='g', lw=2., legend=True)
+lband.plot(ax=ax1, color='r', lw=2., legend=True)
+plt.show()
+
+
+# # RSI 
+
+# In[28]:
+
+
+'''
+The Relative Strength Index (RSI) was published
+ by J. Welles Wilder. The current price is normalized as a percentage
+ between 0 and 100. The name of this oscillator is misleading because
+ it does not compare the instrument relative to another instrument
+ or set of instruments, but rather represents the current price relative
+ to other recent pieces within the selected lookback window length.
+ RSI = 100 - (100 / (1 + RS))
+Where:
+ RS = ratio of smoothed average of n-period gains divided by the
+ absolute value of the smoothed average of n-period losses.
+ '''
+import statistics as stats
+
+time_period = 20 # look back period to compute gains & losses
+gain_history = [] # history of gains over look back period (0 if no gain, magnitude of gain if gain)
+loss_history = [] # history of losses over look back period (0 if no loss, magnitude of loss if loss)
+avg_gain_values = [] # track avg gains for visualization purposes
+avg_loss_values = [] # track avg losses for visualization purposes
+rsi_values = [] # track computed RSI values
+last_price = 0 # current_price - last_price > 0 => gain. current_price - last_price < 0 => loss.
+
+for close_price in close:
+    if last_price == 0:
+        last_price = close_price
+
+    gain_history.append(max(0, close_price - last_price))
+    loss_history.append(max(0, last_price - close_price))
+    last_price = close_price
+
+    if len(gain_history) > time_period: # maximum observations is equal to lookback period
+        del (gain_history[0])
+        del (loss_history[0])
+
+    avg_gain = stats.mean(gain_history) # average gain over lookback period
+    avg_loss = stats.mean(loss_history) # average loss over lookback period
+
+    avg_gain_values.append(avg_gain)
+    avg_loss_values.append(avg_loss)
+
+    rs = 0
+    if avg_loss > 0: # to avoid division by 0, which is undefined
+        rs = avg_gain / avg_loss
+
+    rsi = 100 - (100 / (1 + rs))
+    rsi_values.append(rsi)
+
+goog_data = goog_data.assign(ClosePrice=pd.Series(close, index=goog_data.index))
+goog_data = goog_data.assign(RelativeStrengthAvgGainOver20Days=pd.Series(avg_gain_values, index=goog_data.index))
+goog_data = goog_data.assign(RelativeStrengthAvgLossOver20Days=pd.Series(avg_loss_values, index=goog_data.index))
+goog_data = goog_data.assign(RelativeStrengthIndicatorOver20Days=pd.Series(rsi_values, index=goog_data.index))
+
+close_price = goog_data['ClosePrice']
+rs_gain = goog_data['RelativeStrengthAvgGainOver20Days']
+rs_loss = goog_data['RelativeStrengthAvgLossOver20Days']
+rsi = goog_data['RelativeStrengthIndicatorOver20Days']
+
+import matplotlib.pyplot as plt
+
+fig = plt.figure()
+ax1 = fig.add_subplot(311, ylabel='Google price in $')
+close_price.plot(ax=ax1, color='black', lw=2., legend=True)
+ax2 = fig.add_subplot(312, ylabel='RS')
+rs_gain.plot(ax=ax2, color='g', lw=2., legend=True)
+rs_loss.plot(ax=ax2, color='r', lw=2., legend=True)
+ax3 = fig.add_subplot(313, ylabel='RSI')
+rsi.plot(ax=ax3, color='b', lw=2., legend=True)
+plt.show()
+
+
+# # STDEV
+
+# In[29]:
+
+
+'''
+Standard Deviation is a statistical calculation
+ used to measure the variability. In trading this value is known
+ as volatility. A low standard deviation indicates that the data
+ points tend to be very close to the mean, whereas high standard
+ deviation indicates that the data points are spread out over a large
+ range of values.
+n = number of periods
+Calculate the moving average.
+ The formula is:
+d = ((P1-MA)^2 + (P2-MA)^2 + ... (Pn-MA)^2)/n
+Pn is the price you pay for the nth interval
+n is the number of periods you select
+Take the square root of d. This gives you the standard deviation.
+stddev = sqrt(d)
+ '''
+#import statistics as stats
+#import math as math
+
+time_period = 20 # look back period
+history = [] # history of prices
+sma_values = [] # to track moving average values for visualization purposes
+stddev_values = [] # history of computed stdev values
+
+for close_price in close:
+    history.append(close_price)
+    if len(history) > time_period: # we track at most 'time_period' number of prices
+        del (history[0])
+
+    sma = stats.mean(history)
+    sma_values.append(sma)
+    variance = 0 # variance is square of standard deviation
+    for hist_price in history:
+        variance = variance + ((hist_price - sma) ** 2)
+
+    stdev = math.sqrt(variance / len(history))
+
+    stddev_values.append(stdev)
+
+goog_data = goog_data.assign(ClosePrice=pd.Series(close, index=goog_data.index))
+goog_data = goog_data.assign(StandardDeviationOver20Days=pd.Series(stddev_values, index=goog_data.index))
+
+close_price = goog_data['ClosePrice']
+stddev = goog_data['StandardDeviationOver20Days']
+
+import matplotlib.pyplot as plt
+
+fig = plt.figure()
+ax1 = fig.add_subplot(211, ylabel='Google price in $')
+close_price.plot(ax=ax1, color='g', lw=2., legend=True)
+ax2 = fig.add_subplot(212, ylabel='Stddev in $')
+stddev.plot(ax=ax2, color='b', lw=2., legend=True)
+ax2.axhline(y=stats.mean(stddev_values), color='k')
+plt.show()
+
+
+# # Momentum
+
+# In[60]:
+
+
+'''
+The Momentum (MOM) indicator compares the
+ current price with the previous price from a selected number of
+ periods ago. This indicator is similar to the “Rate of Change” indicator,
+ but the MOM does not normalize the price, so different instruments
+ can have different indicator values based on their point values.
+ MOM =  Price - Price of n periods ago
+ '''
+
+
+# In[30]:
+
+
+time_period = 20 # how far to look back to find reference price to computemomentum
+history = [] # history of observed prices to use in momentum calculation
+mom_values = [] # track momentum values for visualization purposes
+
+
+# In[31]:
+
+
+for close_price in close:
+    history.append(close_price)
+    if len(history) > time_period: # history is at most 'time_period' number of observations
+        del (history[0])
+    mom = close_price - history[0]
+    mom_values.append(mom)
+
+
+# In[32]:
+
+
+goog_data = goog_data.assign(ClosePrice=pd.Series(close, index=goog_data.index))
+goog_data = goog_data.assign(MomentumFromPrice20DaysAgo=pd.Series(mom_values, index=goog_data.index))
+close_price = goog_data['ClosePrice']
+mom = goog_data['MomentumFromPrice20DaysAgo']
+
+
+# In[33]:
+
+
+fig = plt.figure()
+ax1 = fig.add_subplot(211, ylabel='Google price in $')
+close_price.plot(ax=ax1, color='g', lw=2., legend=True)
+ax2 = fig.add_subplot(212, ylabel='Momentum in $')
+mom.plot(ax=ax2, color='b', lw=2., legend=True)
+plt.show()
+
+
+# # Seasonality
+
+# In[34]:
+
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from pandas_datareader import data
+start_date = '2001-01-01'
+end_date = '2018-01-01'
+SRC_DATA_FILENAME='goog_data_large.pkl'
+
+
+# In[38]:
+
+
+try:
+    goog_data = pd.read_pickle(SRC_DATA_FILENAME)
+    print('File data found...reading GOOG data')
+except FileNotFoundError:
+    print('File not found...downloading the GOOG data')
+    goog_data = data.DataReader('GOOG', 'yahoo', start_date, end_date)
+    goog_data.to_pickle(SRC_DATA_FILENAME)
+
+
+# In[45]:
+
+
+goog_monthly_return = goog_data['Adj Close'].pct_change().groupby([goog_data['Adj Close'].index.year, goog_data['Adj Close'].index.month]).mean()
+goog_monthly_return
+
+
+# In[48]:
+
+
+goog_monthly_return[1]
+
+
+# In[43]:
+
+
+goog_montly_return_list=[]
+for i in range(len(goog_monthly_return)):
+    goog_montly_return_list.append({'month':goog_monthly_return.index[i][1],'monthly_return': goog_monthly_return[i]})
+
+
+# In[51]:
+
+
+goog_montly_return_list=pd.DataFrame(goog_montly_return_list, columns=('month','monthly_return'))
+goog_montly_return_list.boxplot(column='monthly_return', by='month')
+ax = plt.gca()
+labels = [item.get_text() for item in ax.get_xticklabels()]
+labels=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+ax.set_xticklabels(labels)
+ax.set_ylabel('GOOG return')
+plt.tick_params(axis='both', which='major', labelsize=7)
+plt.title("GOOG Monthly return 2001-2018")
+plt.suptitle("")
+plt.show()
+
+
+# In[53]:
+
+
+def plot_rolling_statistics_ts(ts, titletext,ytext, window_size=12):
+    ts.plot(color='red', label='Original', lw=0.5)
+    ts.rolling(window_size).mean().plot(
+    color='blue',label='Rolling Mean')
+    ts.rolling(window_size).std().plot(
+    color='black', label='Rolling Std')
+    plt.legend(loc='best')
+    plt.ylabel(ytext)
+    plt.title(titletext)
+    plt.show(block=False)
+
+
+# In[54]:
+
+
+plot_rolling_statistics_ts(goog_monthly_return[1:],'GOOG prices rolling mean and standard deviation','Monthly return')
+plot_rolling_statistics_ts(goog_data['Adj Close'],'GOOG prices rolling mean and standard deviation','Daily prices',365)
+
+
+# In[61]:
+
+
+from statsmodels.tsa.stattools import adfuller
+def test_stationarity(timeseries):
+    print('Results of Dickey-Fuller Test:')
+    dftest = adfuller(timeseries[1:], autolag='AIC')
+    dfoutput = pd.Series(dftest[0:4], index=['Test Statistic', 'pvalue', '#Lags Used', 'Number of Observations Used'])
+    print(dfoutput)
+
+
+# In[62]:
+
+
+test_stationarity(goog_data['Adj Close'])
+
+
+# In[63]:
+
+
+test_stationarity(goog_monthly_return[1:])
+
+
+# # ARIMA
+
+# In[64]:
+
+
+from statsmodels.graphics.tsaplots import plot_acf
+from statsmodels.graphics.tsaplots import plot_pacf
+from matplotlib import pyplot
+
+
+# In[65]:
+
+
+pyplot.figure()
+pyplot.subplot(211)
+plot_acf(goog_monthly_return[1:], ax=pyplot.gca(),lags=10)
+pyplot.subplot(212)
+plot_pacf(goog_monthly_return[1:], ax=pyplot.gca(),lags=10)
+pyplot.show()
+
+
+# In[66]:
+
+
+from statsmodels.tsa.arima_model import ARIMA
+model = ARIMA(goog_monthly_return[1:], order=(2, 0, 2))
+fitted_results = model.fit()
+goog_monthly_return[1:].plot()
+fitted_results.fittedvalues.plot(color='red')
+plt.show()
+
+
+# In[68]:
+
+
+fitted_results.fittedvalues
+
+
+# In[ ]:
+
+
+
+
