@@ -1,0 +1,350 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[35]:
+
+
+import numpy as np
+import pandas as pd
+from pandas_datareader import data
+
+
+# In[27]:
+
+
+def load_financial_data(start_date, end_date,output_file):
+    
+    try:
+        df = pd.read_pickle(output_file)
+        print('Data Found')
+    except FileNotFoundError:
+        print('Data Not Found! Downloading...')
+        df = data.DataReader('GOOG', 'yahoo', start_date, end_date)
+        df.to_pickle(output_file)
+    
+    return df
+        
+
+
+# In[30]:
+
+
+goog_data = load_financial_data(start_date = '2001-01-01', end_date = '2018-01-01', output_file = 'goog_data_large0.pkl')
+
+
+# In[128]:
+
+
+goog_data
+
+
+# In[131]:
+
+
+def create_classification_trading_condition(df):
+    df['Open-Close'] = df.Open - df.Close
+    df['High-Low'] = df.High - df.Low
+    df.dropna(inplace = True)
+    X = df[['Open-Close' , 'High-Low']]
+    Y = np.where(df['Close'].shift(-1)> df['Close'], 1 ,-1)
+    
+    return (df, X, Y)
+    
+
+
+# In[51]:
+
+
+def create_regression_trading_condition(df):
+    df['Open-Close'] = df.Open - df.Close
+    df['High-Low'] = df.High - df.Low
+    df['Target'] = df['Close'].shift(-1) - df['Close']
+    df.dropna(inplace = True)
+    X = df[['Open-Close', 'High-Low']]
+    Y = df['Close'].shift(-1) - df['Close']
+    
+    return (df, X, Y)
+
+
+# In[61]:
+
+
+from sklearn.model_selection import train_test_split
+
+def create_train_split_group(X,Y, split_ratio = 0.8):
+    return train_test_split(X,Y, shuffle = False, train_size = split_ratio)
+
+
+# In[54]:
+
+
+goog_data, X, y = create_regression_trading_condition(goog_data)
+
+
+# In[55]:
+
+
+pd.plotting.scatter_matrix(goog_data[['Open-Close', 'High-Low','Target']], grid = True, diagonal = 'kde')
+
+
+# In[63]:
+
+
+X_train,X_test,Y_train,Y_test= create_train_split_group(X,y,split_ratio=0.8)
+
+
+# # Linear Regression
+
+# In[64]:
+
+
+from sklearn import linear_model
+ols = linear_model.LinearRegression()
+ols.fit(X_train, Y_train)
+
+
+# In[65]:
+
+
+print('Coefficients: \n', ols.coef_)
+
+
+# In[66]:
+
+
+from sklearn.metrics import mean_squared_error , r2_score
+
+
+# In[80]:
+
+
+print(f'Mean squared error: {mean_squared_error(Y_train, ols.predict(X_train))}')
+
+
+# In[81]:
+
+
+print('Variance score: %.2f' % r2_score(Y_train,ols.predict(X_train)))
+
+
+# In[86]:
+
+
+X_test
+
+
+# In[88]:
+
+
+goog_data['Predicted_Signal'] = ols.predict(X)
+goog_data['GOOG_Returns'] = np.log(goog_data['Close'] / goog_data['Close'].shift(1))
+
+
+# In[109]:
+
+
+def calculate_return(df, split_value, symbol):
+    cum_goog_return = df[split_value:]['%s_Returns' %symbol].cumsum() * 100
+    df['Strategy_Returns'] = df['%s_Returns' % symbol] *df['Predicted_Signal'].shift(1)
+    return cum_goog_return
+
+
+# In[110]:
+
+
+def calculate_strategy_return(df, split_value, symbol):
+    cum_strategy_return = df[split_value:]['Strategy_Returns'].cumsum() * 100
+    return cum_strategy_return
+
+
+# In[112]:
+
+
+cum_goog_return = calculate_return(goog_data,split_value=len(X_train), symbol='GOOG')
+cum_strategy_return = calculate_strategy_return(goog_data,split_value=len(X_train), symbol='GOOG')
+
+
+# In[118]:
+
+
+import matplotlib.pyplot as plt
+def plot_chart(cum_symbol_return, cum_strategy_return, symbol):
+    plt.figure(figsize=(10, 5))
+    plt.plot(cum_symbol_return, label='%s Returns' % symbol)
+    plt.plot(cum_strategy_return, label='Strategy Returns')
+    plt.legend()
+
+
+# In[119]:
+
+
+plot_chart(cum_goog_return, cum_strategy_return, symbol='GOOG')
+
+
+# In[120]:
+
+
+def sharpe_ratio(symbol_returns, strategy_returns):
+    strategy_std = strategy_returns.std()
+    sharpe = (strategy_returns - symbol_returns) / strategy_std
+    return sharpe.mean()
+
+
+# In[121]:
+
+
+print(sharpe_ratio(cum_strategy_return, cum_goog_return))
+
+
+# # Lasso: L1 regul
+
+# In[122]:
+
+
+from sklearn import linear_model
+lasso = linear_model.Lasso(alpha = 0.1)
+
+
+# In[123]:
+
+
+lasso.fit(X_train, Y_train)
+
+
+# In[125]:
+
+
+print("Coef: \n", lasso.coef_)
+
+
+# # Ridge : L2 regul
+
+# In[126]:
+
+
+from sklearn import linear_model
+
+# Fit the model
+ridge = linear_model.Ridge(alpha=10000)
+ridge.fit(X_train, Y_train)
+
+
+# In[127]:
+
+
+print('Coefficients: \n', ridge.coef_)
+
+
+# # KNN
+
+# In[140]:
+
+
+goog_data=load_financial_data(start_date='2001-01-01', end_date = '2018-01-01', output_file='goog_data_large.pkl')
+df, X, Y= create_classification_trading_condition(goog_data)
+
+
+# In[143]:
+
+
+Y
+
+
+# In[144]:
+
+
+X_train,X_test,Y_train,Y_test= create_train_split_group(X,Y,split_ratio=0.8)
+
+
+# In[145]:
+
+
+from sklearn.neighbors import KNeighborsClassifier
+
+
+# In[146]:
+
+
+knn = KNeighborsClassifier(n_neighbors=15)
+knn.fit(X_train,Y_train)
+
+
+# In[147]:
+
+
+from sklearn.metrics import accuracy_score
+
+
+# In[148]:
+
+
+accuracy_train = accuracy_score(Y_train, knn.predict(X_train))
+accuracy_test = accuracy_score(Y_test, knn.predict(X_test))
+
+
+# In[149]:
+
+
+goog_data['Predicted_Signal']=knn.predict(X)
+
+
+# In[150]:
+
+
+goog_data['GOOG_Returns']=np.log(goog_data['Close']/goog_data['Close'].shift(1))
+
+
+# In[152]:
+
+
+cum_goog_return=calculate_return(goog_data,split_value=len(X_train) ,symbol='GOOG')
+cum_strategy_return= calculate_strategy_return(goog_data,split_value=len(X_train) ,symbol='GOOG')
+
+
+# In[153]:
+
+
+plot_chart(cum_goog_return, cum_strategy_return,symbol='GOOG')
+
+
+# # SVC
+
+# In[155]:
+
+
+from sklearn.svm import SVC
+
+
+# In[156]:
+
+
+svc=SVC()
+svc.fit(X_train, Y_train)
+
+
+# In[157]:
+
+
+goog_data['Predicted_Signal']=svc.predict(X)
+goog_data['GOOG_Returns']=np.log(goog_data['Close']/ goog_data['Close'].shift(1))
+
+
+# In[158]:
+
+
+goog_data['Predicted_Signal']
+
+
+# In[159]:
+
+
+cum_goog_return=calculate_return(goog_data,split_value=len(X_train),symbol='GOOG')
+cum_strategy_return=calculate_strategy_return(goog_data,split_value=len(X_train),symbol='GOOG')
+plot_chart(cum_goog_return, cum_strategy_return,symbol='GOOG')
+
+
+# In[ ]:
+
+
+
+
