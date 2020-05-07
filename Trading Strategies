@@ -1,0 +1,671 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# # Dual moving average
+
+# In[27]:
+
+
+import pandas as pd
+import numpy as np
+from pandas_datareader import data
+import matplotlib.pyplot as plt
+get_ipython().run_line_magic('matplotlib', 'inline')
+
+
+# In[2]:
+
+
+def load_financial_data(start_date, end_date, output_file):
+    
+    try:
+        df = pd.read_pickle(output_file)
+        print('File Found')
+    except FileNotFoundError:
+        print('File not found...downloading...')
+        df = data.DataReader('GOOG', 'yahoo', start_date, end_date)
+        df.to_picke(output_file)
+    
+    return df
+
+
+# In[7]:
+
+
+goog_data = load_financial_data( start_date = '2001-01-01', end_date = '2018-01-01', output_file = 'goog_data.pkl')
+
+
+# In[8]:
+
+
+goog_data
+
+
+# In[23]:
+
+
+def double_moving_average(financial_data, short_window, long_window):
+    
+    signals = pd.DataFrame(index = financial_data.index)
+    signals['signal'] = 0.0
+    signals['short_mavg'] = financial_data['Close'].rolling(window = short_window, min_periods = 1, center = False).mean()
+    signals['long_mavg'] = financial_data['Close'].rolling(window = long_window, min_periods = 1, center= False).mean()
+    signals['signal'][short_window:] = np.where(signals['short_mavg'][short_window:] > signals['long_mavg'][short_window:], 1,0)
+    signals['orders'] = signals['signal'].diff()
+    
+    return signals
+
+
+# In[24]:
+
+
+ts=double_moving_average(goog_data,20,100)
+
+
+# In[25]:
+
+
+ts
+
+
+# In[30]:
+
+
+fig = plt.figure()
+ax1 = fig.add_subplot(111,ylabel = 'Google price in $')
+goog_data['Adj Close'].plot(ax = ax1, color = 'g', lw = 0.5)
+ts['short_mavg'].plot(ax = ax1, color = 'r', lw = 2.)
+ts['long_mavg'].plot(ax =ax1, color = 'b', lw =2.)
+ax1.plot(ts.loc[ts.orders ==1.0].index, goog_data['Adj Close'][ts.orders==1.0], '^', markersize = 7, color = 'k')
+ax1.plot(ts.loc[ts.orders ==-1.0].index, goog_data['Adj Close'][ts.orders==-1.0], 'v', markersize = 7, color = 'k')
+plt.legend(['Price','Short mavg', 'Long mavg', 'buy', 'sell'])
+plt.title('Double Moving Average Trading Strategy')
+plt.show
+
+
+# # Naive Trading Strategy
+
+# In[32]:
+
+
+def naive_momentum_trading(financial_data, nb_conseq_days):
+    signals = pd.DataFrame(index = financial_data.index)
+    signals['orders'] = 0
+    cons_day = 0
+    prior_price = 0
+    init = True
+    for k in range(len(financial_data['Adj Close'])):
+        price = financial_data['Adj Close'][k]
+        if init:
+            prior_price = price
+            init = False
+        elif price> prior_price:
+            if cons_day <0:
+                cons_day = 0
+            cons_day+= 1
+        elif price< prior_price:
+            if cons_day>0:
+                cons_day = 0
+            cons_day-=1
+        if cons_day ==nb_conseq_days:
+            signals['orders'][k] =1
+        elif cons_day == -nb_conseq_days:
+            signals['orders'][k] = -1
+        
+    return signals
+
+
+# In[33]:
+
+
+ts = naive_momentum_trading(goog_data, 5)
+
+
+# In[34]:
+
+
+ts
+
+
+# In[40]:
+
+
+fig = plt.figure()
+ax1 = fig.add_subplot(111, ylabel = 'Google price in $')
+goog_data['Adj Close'].plot(ax = ax1, color = 'g', lw =.5)
+ax1.plot(ts.loc[ts.orders==1.0].index, goog_data['Adj Close'][ts.orders==1.0], '^',markersize = 7, color = 'k')
+ax1.plot(ts.loc[ts.orders==-1.0].index, goog_data['Adj Close'][ts.orders==-1.0], 'v',markersize = 7, color = 'k')
+plt.legend(['Price', 'Buy', 'Sell'])
+plt.title('Naive Trading Strategy')
+
+
+# # Turtle Trading
+
+# In[45]:
+
+
+def turtle_trading(financial_data, window_size):
+    signals = pd.DataFrame(index = financial_data.index)
+    signals['orders'] = 0
+    #window_size_days high
+    signals['high'] = financial_data['Adj Close'].shift(1).rolling(window = window_size).max()
+    #window_size_days low
+    signals['low'] = financial_data['Adj Close'].shift(1).rolling(window = window_size).min()
+    #window_size_days avg
+    signals['avg'] = financial_data['Adj Close'].shift(1).rolling(window = window_size).mean()
+    
+    signals['long_entry'] = financial_data['Adj Close'] > signals.high
+    signals['short_entry'] = financial_data['Adj Close'] < signals.low
+    
+    signals['long_exit'] = financial_data['Adj Close'] < signals.avg
+    signals['short_exit'] = financial_data['Adj Close'] > signals.avg
+    
+    init = True
+    position = 0
+    for k in range(len(signals)):
+        if signals['long_entry'][k] and position == 0:
+            signals.orders.values[k] = 1
+            position =1
+        elif signals['short_entry'][k] and position ==0:
+            signals.orders.values[k] = -1
+            position = -1
+        elif signals['short_exit'][k] and position >0:
+            signals.orders.values[k] = -1
+            position = 0
+        elif signals['long_exit'][k] and position <0:
+            signals.orders.values[k] = 1
+            position = 0
+        else:
+            signals.orders.values[k] = 0
+    
+    return signals
+            
+
+
+# In[46]:
+
+
+ts = turtle_trading(goog_data, 50)
+
+
+# In[50]:
+
+
+fig = plt.figure()
+ax1 = fig.add_subplot(111, ylabel='Google price in $')
+goog_data["Adj Close"].plot(ax=ax1, color='g', lw=.5)
+ts["high"].plot(ax=ax1, color='g', lw=.5)
+ts["low"].plot(ax=ax1, color='r', lw=.5)
+ts["avg"].plot(ax=ax1, color='b', lw=.5)
+
+
+ax1.plot(ts.loc[ts.orders== 1.0].index,
+         goog_data["Adj Close"][ts.orders == 1.0],
+         '^', markersize=7, color='k')
+
+ax1.plot(ts.loc[ts.orders== -1.0].index,
+         goog_data["Adj Close"][ts.orders == -1.0],
+         'v', markersize=7, color='k')
+
+
+# In[51]:
+
+
+ts
+
+# You are going to set your initial amount of money you want
+# to invest --- here it is 10,000
+initial_capital = float(10000.0)
+
+# You are going to create a new dataframe positions
+# Remember the index is still the same as signals
+positions = pd.DataFrame(index=signals.index).fillna(0.0)
+
+# You are going to buy 10 shares of MSFT when signal is 1
+# You are going to sell 10 shares of MSFT when signal is -1
+# You will assign these values to the column MSFT of the
+# dataframe positions
+positions['MSFT'] = 10 * signals['signal']
+
+# You are now going to calculate the notional (quantity x price)
+# for your portfolio. You will multiply Adj Close from
+# the dataframe containing prices and the positions (10 shares)
+# You will store it into the variable portfolio
+portfolio = positions.multiply(financial_data['Adj Close'], axis=0)
+
+# Add `holdings` to portfolio
+portfolio['holdings'] = (positions.multiply(financial_data['Adj Close'], axis=0)).sum(axis=1)
+
+# You will store positions.diff into pos_diff
+pos_diff = positions.diff()
+# You will now add a column cash in your dataframe portfolio
+# which will calculate the amount of cash you have
+# initial_capital - (the notional you use for your different buy/sell)
+portfolio['cash'] = initial_capital - (pos_diff.multiply(financial_data['Adj Close'], axis=0)).sum(axis=1).cumsum()
+
+# You will now add a column total to your portfolio calculating the part of holding
+# and the part of cash
+portfolio['total'] = portfolio['cash'] + portfolio['holdings']
+
+# Add `returns` to portfolio
+portfolio['returns'] = portfolio['total'].pct_change()
+
+# Print the first lines of `portfolio`
+print(portfolio)
+
+# # Pair Trading
+
+# In[130]:
+
+
+import pandas as pd
+pd.set_option('display.max_rows', 500)
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.width', 1000)
+import numpy as np
+import matplotlib.pyplot as plt
+from statsmodels.tsa.stattools import coint
+import seaborn as sns
+
+
+from pandas_datareader import data as web
+
+
+# In[131]:
+
+
+def find_cointegrated_pairs(data):
+    n = data.shape[1]
+    pvalue_matrix = np.ones((n,n))
+    keys = data.keys()
+    pairs = []
+    for i in range(n):
+        for j in range(i+1, n):
+            result = coint(data[keys[i]], data[keys[j]])
+            pvalue_matrix[i,j] = result[1]
+            if result[1] < 0.02:
+                pairs.append((keys[i], keys[j]))
+    return pvalue_matrix, pairs
+
+
+# In[132]:
+
+
+symbolsIds = ['SPY', 'AAPL', 'ADBE', 'LUV', 'MSFT', 'SKYW', 'QCOM', 'HPQ', 'JNPR', 'AMD', 'IBM']
+
+
+# In[133]:
+
+
+def load_financial_data(symbols, start_date, end_date, output_file):
+    try:
+        df = pd.read_pickle(output_file)
+        print('found')
+        
+    except FileNotFoundError:
+        print('not found. downloading...')
+        df = web.DataReader(symbols, 'yahoo', start_date, end_date)
+        df.to_pickle(output_file)
+        return df
+
+
+# In[134]:
+
+
+data = load_financial_data(symbolsIds, '2001-01-01', '2018-01-01', 'multi_data2.pkl')
+
+
+# In[135]:
+
+
+pvalues, pairs = find_cointegrated_pairs(data['Adj Close'])
+
+
+# In[136]:
+
+
+
+coint(data['Adj Close'][data['Adj Close'].keys()[1]], data['Adj Close'][data['Adj Close'].keys()[2]])
+
+
+# In[137]:
+
+
+pairs
+
+
+# In[138]:
+
+
+sns.heatmap(pvalues, xticklabels = symbolsIds, yticklabels= symbolsIds, cmap= 'RdYlGn_r', mask = (pvalues>=.98))
+
+example for cointegration
+# In[139]:
+
+
+np.random.seed(123)
+Symbol1_returns = np.random.normal(0,1,100)
+Symbol1_prices = pd.Series(np.cumsum(Symbol1_returns), name= 'Symbol1')+ 10
+Symbol1_prices.plot(figsize = (15,7))
+plt.show
+
+
+# In[140]:
+
+
+noise = np.random.normal(0,1,100)
+Symbol2_prices = Symbol1_prices + 10 + noise
+Symbol2_prices.name = 'Symbol2'
+plt.title('Symbol 1 and Symbol 2 prices')
+Symbol1_prices.plot()
+Symbol2_prices.plot()
+plt.show()
+
+
+# In[141]:
+
+
+score, pvalue,_ = coint(Symbol1_prices, Symbol2_prices)
+print(score, pvalue)
+
+
+# In[142]:
+
+
+ratios = Symbol1_prices / Symbol2_prices
+plt.title("Ratio between Symbol 1 and Symbol 2 price")
+ratios.plot()
+plt.show()
+
+
+# In[143]:
+
+
+def zscore(series):
+    return (series - series.mean()) / np.std(series)
+
+
+# In[144]:
+
+
+zscore(ratios).plot()
+plt.title("Z-score evolution")
+plt.axhline(zscore(ratios).mean(),color="black")
+plt.axhline(1.0, color="red")
+plt.axhline(-1.0, color="green")
+plt.show()
+
+
+# In[145]:
+
+
+buy = ratios.copy()
+sell = ratios.copy()
+buy[zscore(ratios)>-1] = 0
+sell[zscore(ratios)<1] = 0
+
+
+# In[146]:
+
+
+buy = ratios.copy()
+sell = ratios.copy()
+buy[zscore(ratios)>-1] = 0
+sell[zscore(ratios)<1] = 0
+
+
+# In[147]:
+
+
+ratios.plot()
+buy.plot(color = 'g', linestyle = 'None', marker = '^')
+sell.plot(color = 'r', linestyle = 'None', marker = 'v')
+x1,x2,y1,y2 = plt.axis()
+plt.axis((x1,x2,ratios.min(),ratios.max()))
+plt.legend(["Ratio", 'Buy Signal', 'Sell Signal'])
+plt.show()
+
+
+# In[148]:
+
+
+symbol1_buy=Symbol1_prices.copy()
+symbol1_sell=Symbol1_prices.copy()
+symbol2_buy=Symbol2_prices.copy()
+symbol2_sell=Symbol2_prices.copy()
+
+Symbol1_prices.plot()
+symbol1_buy[zscore(ratios)>-1] = 0
+symbol1_sell[zscore(ratios)<1] = 0
+symbol1_buy.plot(color="g", linestyle="None", marker="^")
+symbol1_sell.plot(color="r", linestyle="None", marker="v")
+Symbol2_prices.plot()
+symbol2_buy[zscore(ratios)<1] = 0
+symbol2_sell[zscore(ratios)>-1] = 0
+symbol2_buy.plot(color="g", linestyle="None", marker="^")
+symbol2_sell.plot(color="r", linestyle="None", marker="v")
+x1,x2,y1,y2 = plt.axis()
+plt.axis((x1,x2,Symbol1_prices.min(),Symbol2_prices.max()))
+plt.legend(["Symbol1", "Buy Signal", "Sell Signal","Symbol2"])
+plt.show()
+
+back to real pair trading
+# In[149]:
+
+
+pairs #choosing the first pair
+
+
+# In[152]:
+
+
+Symbol1_prices = data['Adj Close']['MSFT']
+Symbol1_prices.plot(figsize = (15,7))
+Symbol2_prices = data['Adj Close']['ADBE']
+Symbol2_prices.name = 'ADBE'
+plt.title('MSFT and ADBE prices')
+Symbol2_prices.plot()
+plt.legend()
+plt.show()
+
+
+# In[153]:
+
+
+score, pvalue, _ = coint(Symbol1_prices, Symbol2_prices)
+print(pvalue)
+ratios = Symbol1_prices / Symbol2_prices
+plt.title("Ratio between Symbol 1 and Symbol 2 price")
+
+ratios.plot()
+plt.show()
+
+
+# In[154]:
+
+
+zscore(ratios).plot()
+plt.title("Z-score evolution")
+plt.axhline(zscore(ratios).mean(),color="black")
+plt.axhline(1.0, color="red")
+plt.axhline(-1.0, color="green")
+plt.show()
+
+
+# In[158]:
+
+
+ratios.plot()
+buy = ratios.copy()
+sell = ratios.copy()
+buy[zscore(ratios)>-1] = 0
+sell[zscore(ratios)<1] = 0
+buy.plot(color="g", linestyle="None", marker="^")
+sell.plot(color="r", linestyle="None", marker="v")
+x1,x2,y1,y2 = plt.axis()
+plt.axis((x1,x2,ratios.min(),ratios.max()))
+plt.legend(["Ratio", "Buy Signal", "Sell Signal"])
+plt.show()
+
+
+# In[159]:
+
+
+symbol1_buy=Symbol1_prices.copy()
+symbol1_sell=Symbol1_prices.copy()
+symbol2_buy=Symbol2_prices.copy()
+symbol2_sell=Symbol2_prices.copy()
+
+Symbol1_prices.plot()
+symbol1_buy[zscore(ratios)>-1] = 0
+symbol1_sell[zscore(ratios)<1] = 0
+symbol1_buy.plot(color="g", linestyle="None", marker="^")
+symbol1_sell.plot(color="r", linestyle="None", marker="v")
+
+
+# In[160]:
+
+
+pair_correlation_trading_strategy = pd.DataFrame(index = Symbol1_prices.index)
+pair_correlation_trading_strategy['symbol1_price'] = Symbol1_prices
+pair_correlation_trading_strategy['symbol1_buy'] = np.zeros(len(Symbol1_prices))
+pair_correlation_trading_strategy['symbol1_sell'] = np.zeros(len(Symbol1_prices))
+pair_correlation_trading_strategy['symbol2_buy'] = np.zeros(len(Symbol1_prices))
+pair_correlation_trading_strategy['symbol2_sell'] = np.zeros(len(Symbol1_prices))
+
+
+# In[161]:
+
+
+position=0
+for i in range(len(Symbol1_prices)):
+    s1price=Symbol1_prices[i]
+    s2price=Symbol2_prices[i]
+    if not position and symbol1_buy[i]!=0:
+        pair_correlation_trading_strategy['symbol1_buy'][i]=s1price
+        pair_correlation_trading_strategy['symbol2_sell'][i] = s2price
+        position=1
+    elif not position and symbol1_sell[i]!=0:
+        pair_correlation_trading_strategy['symbol1_sell'][i] = s1price
+        pair_correlation_trading_strategy['symbol2_buy'][i] = s2price
+        position = -1
+    elif position==-1 and (symbol1_sell[i]==0 or i==len(Symbol1_prices)-1):
+        pair_correlation_trading_strategy['symbol1_buy'][i] = s1price
+        pair_correlation_trading_strategy['symbol2_sell'][i] = s2price
+        position = 0
+    elif position==1 and (symbol1_buy[i] == 0 or i==len(Symbol1_prices)-1):
+        pair_correlation_trading_strategy['symbol1_sell'][i] = s1price
+        pair_correlation_trading_strategy['symbol2_buy'][i] = s2price
+        position = 0
+
+
+# In[162]:
+
+
+Symbol2_prices.plot()
+symbol2_buy[zscore(ratios)<1] = 0
+symbol2_sell[zscore(ratios)>-1] = 0
+symbol2_buy.plot(color="g", linestyle="None", marker="^")
+symbol2_sell.plot(color="r", linestyle="None", marker="v")
+
+
+# In[163]:
+
+
+Symbol1_prices.plot()
+pair_correlation_trading_strategy['symbol1_buy'].plot(color="g", linestyle="None", marker="^")
+pair_correlation_trading_strategy['symbol1_sell'].plot(color="r", linestyle="None", marker="v")
+Symbol2_prices.plot()
+pair_correlation_trading_strategy['symbol2_buy'].plot(color="g", linestyle="None", marker="^")
+pair_correlation_trading_strategy['symbol2_sell'].plot(color="r", linestyle="None", marker="v")
+x1,x2,y1,y2 = plt.axis()
+plt.axis((x1,x2,Symbol1_prices.min(),Symbol2_prices.max()))
+plt.legend(["Symbol1", "Buy Signal", "Sell Signal","Symbol2"])
+plt.show()
+
+
+# In[164]:
+
+
+pair_correlation_trading_strategy['symbol1_position']=pair_correlation_trading_strategy['symbol1_buy']-pair_correlation_trading_strategy['symbol1_sell']
+
+pair_correlation_trading_strategy['symbol2_position']=pair_correlation_trading_strategy['symbol2_buy']-pair_correlation_trading_strategy['symbol2_sell']
+
+pair_correlation_trading_strategy['symbol1_position'].cumsum().plot()
+pair_correlation_trading_strategy['symbol2_position'].cumsum().plot()
+
+pair_correlation_trading_strategy['total_position']=pair_correlation_trading_strategy['symbol1_position']+pair_correlation_trading_strategy['symbol2_position']
+pair_correlation_trading_strategy['total_position'].cumsum().plot()
+plt.title("Symbol 1 and Symbol 2 positions")
+plt.legend()
+plt.show()
+
+multiple positions
+# In[165]:
+
+
+pair_correlation_trading_strategy['symbol1_price']=Symbol1_prices
+pair_correlation_trading_strategy['symbol1_buy']=np.zeros(len(Symbol1_prices))
+pair_correlation_trading_strategy['symbol1_sell']=np.zeros(len(Symbol1_prices))
+pair_correlation_trading_strategy['symbol2_buy']=np.zeros(len(Symbol1_prices))
+pair_correlation_trading_strategy['symbol2_sell']=np.zeros(len(Symbol1_prices))
+pair_correlation_trading_strategy['delta']=np.zeros(len(Symbol1_prices))
+
+
+# In[166]:
+
+
+position=0
+s1_shares = 1000000
+for i in range(len(Symbol1_prices)):
+    s1positions= Symbol1_prices[i] * s1_shares
+    s2positions= Symbol2_prices[i] * int(s1positions/Symbol2_prices[i])
+    print(Symbol1_prices[i],Symbol2_prices[i])
+    delta_position=s1positions-s2positions
+    if not position and symbol1_buy[i]!=0:
+        pair_correlation_trading_strategy['symbol1_buy'][i]=s1positions
+        pair_correlation_trading_strategy['symbol2_sell'][i] = s2positions
+        pair_correlation_trading_strategy['delta'][i]=delta_position
+        position=1
+    elif not position and symbol1_sell[i]!=0:
+        pair_correlation_trading_strategy['symbol1_sell'][i] = s1positions
+        pair_correlation_trading_strategy['symbol2_buy'][i] = s2positions
+        pair_correlation_trading_strategy['delta'][i] = delta_position
+        position = -1
+    elif position==-1 and (symbol1_sell[i]==0 or i==len(Symbol1_prices)-1):
+        pair_correlation_trading_strategy['symbol1_buy'][i] = s1positions
+        pair_correlation_trading_strategy['symbol2_sell'][i] = s2positions
+        position = 0
+    elif position==1 and (symbol1_buy[i] == 0 or i==len(Symbol1_prices)-1):
+        pair_correlation_trading_strategy['symbol1_sell'][i] = s1positions
+        pair_correlation_trading_strategy['symbol2_buy'][i] = s2positions
+        position = 0
+
+
+# In[167]:
+
+
+pair_correlation_trading_strategy['symbol1_position']=pair_correlation_trading_strategy['symbol1_buy']-pair_correlation_trading_strategy['symbol1_sell']
+
+pair_correlation_trading_strategy['symbol2_position']=pair_correlation_trading_strategy['symbol2_buy']-pair_correlation_trading_strategy['symbol2_sell']
+
+pair_correlation_trading_strategy['symbol1_position'].cumsum().plot()
+pair_correlation_trading_strategy['symbol2_position'].cumsum().plot()
+
+pair_correlation_trading_strategy['total_position']=pair_correlation_trading_strategy['symbol1_position']+pair_correlation_trading_strategy['symbol2_position']
+pair_correlation_trading_strategy['total_position'].cumsum().plot()
+plt.title("Symbol 1 and Symbol 2 positions")
+plt.legend()
+plt.show()
+
+
+pair_correlation_trading_strategy['delta'].plot()
+plt.title("Delta Position")
+plt.show()
+
+
+# In[ ]:
+
+
+
+
